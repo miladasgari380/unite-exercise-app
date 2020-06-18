@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<manifest xmlns="http://tizen.org/ns/packages" api-version="3.0" package="org.example.hrmexercise" version="1.0.0">
+    <profile name="wearable"/>
+    <ui-application appid="org.example.hrmexercise" exec="hrmexercise" multiple="false" nodisplay="false" taskmanage="true" type="capp">
+        <label>hrmexercise</label>
+        <icon>heart2.png</icon>
+    </ui-application>
+    <privileges>
+        <privilege>http://tizen.org/privilege/mediastorage</privilege>
+        <privilege>http://tizen.org/privilege/healthinfo</privilege>
+        <privilege>http://tizen.org/privilege/haptic</privilege>
+        <privilege>http://tizen.org/privilege/display</privilege>
+        <privilege>http://tizen.org/privilege/power</privilege>
+    </privileges>
+</manifest>
