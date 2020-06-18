@@ -638,7 +638,7 @@ static void app_pause(void *data)
 }
 
 
-// handler for the back button
+// handler for the back button/
 void win_back_cb(void *data, Evas_Object *obj, void *event_info) {
 	if(writeToFileFlag) { // monitoring is started but not finished
 		sensorWriteToFile();
