@@ -27,6 +27,8 @@
 #include <device/power.h>
 #include <feedback.h>
 #include <device/haptic.h>
+#include <curl/curl.h>
+#include <net_connection.h>
 
 #define BUFLEN 200
 #define MAX_HR 152
@@ -41,6 +43,8 @@ Evas_Object *event_label_animation;
 Evas_Object *datetime;
 long long time_ref;
 
+char deviceId[256] = "XXXX";
+char devicePass[256] = "XXXX";
 
 #define arraySize  72000 // 60 minutes
 
@@ -81,10 +85,132 @@ bool vibrate = false;
 
 char time_file[256];
 
+struct MemoryStruct {
+  char *memory;
+  size_t size;
+};
+
+static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+  size_t realsize = size * nmemb;
+  struct MemoryStruct *mem = (struct MemoryStruct *)userp;
+
+  char *ptr = realloc(mem->memory, mem->size + realsize + 1);
+  if(!ptr) {
+    /* out of memory! */
+    printf("not enough memory (realloc returned NULL)\n");
+    return 0;
+  }
+
+  mem->memory = ptr;
+  memcpy(&(mem->memory[mem->size]), contents, realsize);
+  mem->size += realsize;
+  mem->memory[mem->size] = 0;
+
+  return realsize;
+}
+
+void directSync(char* filename, char* filetype) {
+	dlog_print(DLOG_DEBUG, LOG_TAG, "file sync");
+	int res;
+	int error_code;
+	int ret;
+
+	CURL *curl;
+	CURLcode curl_err;
+	int conn_err;
+	curl = curl_easy_init();
+	struct curl_httppost *formpost = NULL;
+	struct curl_httppost *lastptr = NULL;
+	struct curl_slist *headerlist = NULL;
+	static const char buf[] = "Expect:";
+	struct MemoryStruct chunk;
+
+	chunk.memory = malloc(1);
+	chunk.size = 0;
+
+
+	static connection_h connection;
+	error_code = connection_create(&connection);
+	if (error_code != CONNECTION_ERROR_NONE)
+		return;
+	connection_wifi_state_e wifi_state;
+	connection_bt_state_e bt_state;
+	connection_ethernet_state_e ethernet_state;
+	connection_type_e net_state;
+	error_code = connection_get_type(connection, &net_state);
+
+	connection_get_wifi_state(connection, &wifi_state);
+	connection_get_bt_state(connection, &bt_state);
+	connection_get_ethernet_state(connection, &ethernet_state);
+
+
+	if (wifi_state == CONNECTION_WIFI_STATE_CONNECTED) {
+		dlog_print(DLOG_INFO, LOG_TAG, "syncing over wifi");
+	} else {
+		dlog_print(DLOG_INFO, LOG_TAG, "syncing over ethernet");
+		char *proxy_address;
+		conn_err = connection_get_proxy(connection, CONNECTION_ADDRESS_FAMILY_IPV4, &proxy_address);
+		if (conn_err == CONNECTION_ERROR_NONE && proxy_address)
+		    curl_easy_setopt(curl, CURLOPT_PROXY, proxy_address);
+	}
+
+
+	curl_formadd(&formpost, &lastptr, CURLFORM_COPYNAME, filetype,
+				CURLFORM_FILE, filename, CURLFORM_END);
+
+	curl_formadd(&formpost, &lastptr, CURLFORM_COPYNAME, "username",
+			CURLFORM_COPYCONTENTS, deviceId, CURLFORM_END);
+
+	curl_formadd(&formpost, &lastptr, CURLFORM_COPYNAME, "password",
+			CURLFORM_COPYCONTENTS, devicePass, CURLFORM_END);
+
+	curl_formadd(&formpost, &lastptr, CURLFORM_COPYNAME, "realtime",
+						CURLFORM_COPYCONTENTS, "true", CURLFORM_END);
+
+	headerlist = curl_slist_append(headerlist, buf);
+
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
+
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headerlist);
+	curl_easy_setopt(curl, CURLOPT_URL, "https://unite.healthscitech.org/api/sensing/samsung_raw/upload");
+
+	curl_easy_setopt(curl, CURLOPT_HTTPPOST, formpost);
+
+	/* setting a callback function to return the data */
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+
+	/* passing the pointer to the response as the callback parameter */
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+
+	/* Perform the request, res will get the return code */
+	res = curl_easy_perform(curl);
+	/* Check for errors */
+	if (res != CURLE_OK) {
+		dlog_print(DLOG_ERROR, LOG_TAG, " curl result %s ",
+						curl_easy_strerror(res));
+	} else {
+		long response_code;
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+		dlog_print(DLOG_INFO, LOG_TAG, "server response code: %d, message: %s", response_code, chunk.memory);
+
+		if (response_code == 200){
+			dlog_print(DLOG_INFO, LOG_TAG, "removing the file after successful sync");
+			remove(filename);
+		}
+	}
+
+	/* always cleanup */
+	curl_easy_cleanup(curl);
+	curl_formfree(formpost);
+	curl_slist_free_all(headerlist);
+	connection_destroy(connection);
+}
+
 void sensorWriteToFile(){
 	//Write the PPG values in the file
 	char filename[256];
-	sprintf(filename, "/opt/usr/media/Downloads/data_%s_exercise.csv",time_file);
+	sprintf(filename, "/opt/usr/media/Downloads/exercise_%s.csv", time_file);
 	FILE * fp = fopen(filename, "w");
 	fprintf(fp , "timestamp\tppg\thrm\taccx\taccy\taccz\tgrax\tgray\tgraz\tgyrx\tgyry\tgrz\tpressure\tstress\n");
 	for(int i = 0; i < hrmCounter; i++ ) {
@@ -96,6 +222,7 @@ void sensorWriteToFile(){
 				allcollectedData[i].pressure, allcollectedData[i].stress);
 	}
 	fclose (fp);
+	directSync(filename, "exercise");
 }
 
 void setTimeForFileName(){ // set time in time_file variable
@@ -547,13 +674,18 @@ void _create_new_cd_display(appdata_s *ad, char *name, void *cb)
     event_label = elm_label_add(box);
     event_label_animation = elm_label_add(box);
     //evas_object_resize(box,400,100);
-    elm_object_text_set(event_label, "Press Start and wait <br>to see your heart rate!");
+    elm_object_text_set(event_label, "<font_size=25>Press Start and wait <br>to see your heart rate! <br>Start the survey on your phone!</font_size>");
     elm_box_pack_end(box, event_label);
 
-    //evas_object_size_hint_align_set(event_label_animation, EVAS_HINT_FILL, EVAS_HINT_FILL);
+
     //evas_object_size_hint_weight_set(event_label_animation, 0.3, 0.3);
+    elm_object_text_set(event_label_animation, "<font_size=10>❤</font_size>");
     elm_box_pack_end(box, event_label_animation);
+    evas_object_show(event_label_animation);
+    //evas_object_size_hint_align_set(event_label_animation, 0, 0);
+    //evas_object_resize(event_label_animation, 0, 0);
     evas_object_show(event_label);
+    //evas_object_hide(event_label_animation);
 
     // stopwatch
     datetime = elm_label_add(box);

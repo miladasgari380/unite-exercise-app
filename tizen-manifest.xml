@@ -7,9 +7,13 @@
     </ui-application>
     <privileges>
         <privilege>http://tizen.org/privilege/mediastorage</privilege>
+        <privilege>http://tizen.org/privilege/network.get</privilege>
         <privilege>http://tizen.org/privilege/healthinfo</privilege>
+        <privilege>http://tizen.org/privilege/network.set</privilege>
         <privilege>http://tizen.org/privilege/haptic</privilege>
+        <privilege>http://tizen.org/privilege/internet</privilege>
         <privilege>http://tizen.org/privilege/display</privilege>
         <privilege>http://tizen.org/privilege/power</privilege>
+        <privilege>http://tizen.org/privilege/network.profile</privilege>
     </privileges>
 </manifest>
